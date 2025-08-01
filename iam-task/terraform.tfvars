@@ -1,23 +1,40 @@
-iam_generic_role = {
-  role_name = "SharedReadOnlyRole"
-  trusted_services = [
-    "ec2.amazonaws.com",
-    "lambda.amazonaws.com"
-  ]
+iam_generic_roles = {
+  shared_readonly = {
+    role_name = "SharedReadOnlyRole"
+    trusted_services = [
+      "ec2.amazonaws.com",
+      "lambda.amazonaws.com"
+    ]
+    custom_policy_paths = [
+      "./policies/custom-readonly-policy.json"
+    ]
+    aws_managed_policy_arns = [
+      "arn:aws:iam::aws:policy/CloudWatchReadOnlyAccess"
+    ]
+    create_inline_policy      = false
+    custom_inline_policy_path = null
+    tags = {
+      Owner = "platform"
+      Env   = "dev"
+    }
+  }
 
-  custom_policy_paths = [
-    "./policies/custom-readonly-policy.json"
-  ]
-
-  aws_managed_policy_arns = [
-    "arn:aws:iam::aws:policy/CloudWatchReadOnlyAccess",
-    "arn:aws:iam::aws:policy/AWSXRayReadOnlyAccess"
-  ]
-
-  create_inline_policy      = false
-  custom_inline_policy_path = null
-
-  tags = {
-    Owner = "terraform"
+  dev_ops_role = {
+    role_name = "DevOpsUtilityRole"
+    trusted_services = [
+      "ec2.amazonaws.com"
+    ]
+    custom_policy_paths = [
+      "./policies/devops-policy.json"
+    ]
+    aws_managed_policy_arns = [
+      "arn:aws:iam::aws:policy/AWSCodeBuildDeveloperAccess"
+    ]
+    create_inline_policy      = true
+    custom_inline_policy_path = "./policies/devops-inline.json"
+    tags = {
+      Owner = "devops"
+      Env   = "dev"
+    }
   }
 }

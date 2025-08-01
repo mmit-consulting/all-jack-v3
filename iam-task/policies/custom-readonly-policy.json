@@ -1,0 +1,97 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "elasticache:Get*",
+        "elasticache:List*",
+        "elasticache:Describe*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:Get*", "s3:List*", "s3:Describe*"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["ssm:Get*", "ssm:List*", "ssm:Describe*"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["cloudwatch:Get*", "cloudwatch:List*", "cloudwatch:Describe*"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["xray:Get*", "xray:List*", "xray:Describe*"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["logs:Get*", "logs:List*", "logs:Describe*"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["ec2:Get*", "ec2:List*", "ec2:Describe*"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "elasticbeanstalk:Get*",
+        "elasticbeanstalk:List*",
+        "elasticbeanstalk:Describe*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["apigateway:Get*", "apigateway:List*", "apigateway:Describe*"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["dynamodb:Get*", "dynamodb:List*", "dynamodb:Describe*"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["glue:Get*", "glue:List*", "glue:Describe*"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["lambda:Get*", "lambda:List*", "lambda:Describe*"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["sqs:Get*", "sqs:List*", "sqs:Describe*"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["sns:Get*", "sns:List*", "sns:Describe*"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["kinesis:Get*", "kinesis:List*", "kinesis:Describe*"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:Get*",
+        "cloudformation:List*",
+        "cloudformation:Describe*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
