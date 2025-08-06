@@ -19,6 +19,16 @@ data "aws_iam_policy_document" "assume_role" {
       identifiers = var.trusted_services
     }
     actions = ["sts:AssumeRole"]
+
+    dynamic "condition" {
+      for_each = var.trust_policy_conditions
+      content {
+        test     = condition.value.test
+        variable = condition.value.variable
+        values   = condition.value.values
+      }
+    }
+
   }
 }
 

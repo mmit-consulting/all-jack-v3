@@ -6,7 +6,16 @@ variable "role_name" {
 variable "trusted_services" {
   description = "List of services/entities allowed to assume this role"
   type        = list(string)
-  default     = ["ec2.amazonaws.com", "lambda.amazonaws.com"]
+}
+
+variable "trust_policy_conditions" {
+  description = "Optional conditions to include in the trust policy"
+  type = list(object({
+    test     = string
+    variable = string
+    values   = list(string)
+  }))
+  default = []
 }
 
 variable "tags" {

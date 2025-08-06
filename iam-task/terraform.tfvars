@@ -5,6 +5,18 @@ iam_generic_roles = {
       "ec2.amazonaws.com",
       "lambda.amazonaws.com"
     ]
+    trust_policy_conditions = [
+      {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = ["123456789012"]
+      },
+      {
+        test     = "ArnLike"
+        variable = "aws:SourceArn"
+        values   = ["arn:aws:lambda:us-east-1:123456789012:function:*"]
+      }
+    ]
     custom_policy_paths = [
       "./policies/custom-readonly-policy.json"
     ]
