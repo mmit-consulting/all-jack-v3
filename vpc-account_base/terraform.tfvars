@@ -27,17 +27,5 @@ tags = {
   businessunit = "midwesttape"
 }
 
-# Leave empty (default []) so we don't duplicate module defaults.
-# Add rules here ONLY if your module requires explicit default SG ingress.
-# default_security_group_ingress = [
-#   {
-#     description = "Allow SSH from DC"
-#     from_port   = 22
-#     to_port     = 22
-#     protocol    = "tcp"
-#     cidr_blocks = ["10.223.0.0/16"]
-#   }
-# ]
-
-# Set only if needed by your module; otherwise leave null
+# Get this value from our old terraform.tfvars
 # transit_gateway_id = "tgw-xxxxxxxxxxxxxxxxx"
