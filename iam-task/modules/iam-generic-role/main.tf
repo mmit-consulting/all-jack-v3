@@ -40,6 +40,23 @@ resource "aws_iam_role" "this" {
 }
 
 ##########################
+# IAM Instance Profile
+##########################
+
+locals {
+  needs_instance_profile = contains(var.trusted_services, "ec2.amazonaws.com")
+}
+
+resource "aws_iam_instance_profile" "this" {
+  count = local.needs_instance_profile ? 1 : 0
+
+  name = var.role_name
+  role = aws_iam_role.this.name
+  tags = var.tags
+}
+
+
+##########################
 # Customer Managed Policies
 ##########################
 
