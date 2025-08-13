@@ -40,6 +40,17 @@ resource "aws_iam_role" "this" {
 }
 
 ##########################
+# IAM Instance Profile
+##########################
+
+resource "aws_iam_instance_profile" "this" {
+  name = var.role_name
+  role = aws_iam_role.this.name
+  tags = var.tags
+}
+
+
+##########################
 # Customer Managed Policies
 ##########################
 
