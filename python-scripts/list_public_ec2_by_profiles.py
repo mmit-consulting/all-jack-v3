@@ -13,25 +13,21 @@ OUTFILE = f"public_ec2_instances_{datetime.today().strftime('%Y-%m-%d')}.csv"
 
 # ---------- Profiles ----------
 def list_profiles():
-    """
-    Discover profiles from ~/.aws/config.
-    """
     cfg_path = os.path.expanduser("~/.aws/config")
     config = configparser.ConfigParser()
     config.read(cfg_path)
 
     profiles = set()
-    # Include the default profile if usable
+    profiles.add("default")
+
     for section in config.sections():
         if section.startswith("profile "):
             profiles.add(section.split("profile ", 1)[1])
+        elif section == "default":
+            profiles.add("default")
     return sorted(p for p in profiles if p)
 
 def valid_session(profile):
-    """
-    Build a session & quickly validate by calling STS GetCallerIdentity.
-    Return (session, account_id, arn) or (None, None, None) on failure.
-    """
     try:
         session = boto3.Session(profile_name=profile)
         sts = session.client("sts")
@@ -48,24 +44,13 @@ def valid_session(profile):
     return None, None, None
 
 # ---------- EC2 Helpers ----------
-def list_regions(session):
-    ec2 = session.client("ec2")
-    resp = ec2.describe_regions(AllRegions=False)
-    return [r["RegionName"] for r in resp["Regions"]]
-
 def build_rtb_maps(ec2_client):
-    """
-    Return:
-      - subnet_to_rtb: map SubnetId -> RouteTable (object)
-      - vpc_to_main_rtb: map VpcId -> main RouteTable (object)
-    """
     subnet_to_rtb = {}
     vpc_to_main_rtb = {}
 
     paginator = ec2_client.get_paginator("describe_route_tables")
     for page in paginator.paginate():
         for rtb in page["RouteTables"]:
-            # Associations tell us if this RTB is main or subnet-specific
             for assoc in rtb.get("Associations", []):
                 if assoc.get("Main"):
                     vpc_to_main_rtb[rtb["VpcId"]] = rtb
@@ -74,10 +59,6 @@ def build_rtb_maps(ec2_client):
     return subnet_to_rtb, vpc_to_main_rtb
 
 def rtb_has_public_default_route(rtb):
-    """
-    True if RTB has 0.0.0.0/0 -> igw-... (IPv4).
-    Also consider IPv6 ::/0 -> igw-... (optional).
-    """
     if not rtb:
         return False
     for route in rtb.get("Routes", []):
@@ -88,9 +69,6 @@ def rtb_has_public_default_route(rtb):
     return False
 
 def gather_public_instances_for_region(ec2, region):
-    """
-    Return rows for this region (list of dicts).
-    """
     rows = []
     subnet_to_rtb, vpc_to_main_rtb = build_rtb_maps(ec2)
 
@@ -104,17 +82,15 @@ def gather_public_instances_for_region(ec2, region):
 
                 public_ip = inst.get("PublicIpAddress")
                 if not public_ip:
-                    continue  # must have a public IPv4
+                    continue
 
                 vpc_id = inst.get("VpcId", "")
                 subnet_id = inst.get("SubnetId", "")
-                # effective RTB
                 rtb = subnet_to_rtb.get(subnet_id) or vpc_to_main_rtb.get(vpc_id)
 
                 if not rtb_has_public_default_route(rtb):
-                    continue  # not internet-routable
+                    continue
 
-                # tags
                 name = ""
                 for t in inst.get("Tags", []) or []:
                     if t.get("Key") == "Name":
@@ -147,17 +123,12 @@ def scan_profile(profile):
     print(f"[+] Authenticated as {arn} (Account {account_id})")
     results = []
 
-    try:
-        regions = list_regions(session)
-    except Exception as e:
-        print(f"[!] Could not list regions for {profile}: {e}")
-        return results
+    regions = ["us-east-1"]  # <--- ONLY SCAN THIS REGION
 
     for region in regions:
         try:
             ec2 = session.client("ec2", region_name=region, config=Config(retries={"max_attempts": 10, "mode": "standard"}))
             rows = gather_public_instances_for_region(ec2, region)
-            # add account/profile metadata
             for r in rows:
                 r["Profile"] = profile
                 r["AccountId"] = account_id
@@ -186,7 +157,7 @@ def write_csv(rows):
     print(f"\n[+] Wrote {len(rows)} rows → {path}")
 
 def main():
-    print("[*] Scanning all local AWS profiles for PUBLIC EC2 instances...")
+    print("[*] Scanning all local AWS profiles for PUBLIC EC2 instances in us-east-1...")
     profiles = list_profiles()
     if not profiles:
         print("[!] No profiles found in ~/.aws/config")
