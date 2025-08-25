@@ -15,7 +15,6 @@ SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL", "UNTRIAG
 def list_findings_for_instance(inspector2, instance_id: str) -> List[Dict]:
     """
     Retrieves ACTIVE Inspector V2 findings for a specific EC2 instance ID.
-    Uses the proper resourceType and paginates.
     """
     findings = []
     next_token = None
@@ -54,11 +53,22 @@ def print_severity_table(counter: Counter):
         print(f"  {s:<13} {counter[s]}")
 
 def fix_available_summary(findings: List[Dict]) -> Counter:
+    """
+    Prefer packageVulnerabilityDetails.fixAvailable, otherwise infer:
+    if ANY vulnerablePackages[].fixedInVersion exists -> YES, else UNKNOWN.
+    """
     counts = Counter()
     for f in findings:
         pvd = f.get("packageVulnerabilityDetails") or {}
-        val = (pvd.get("fixAvailable") or "UNKNOWN").upper()
-        counts[val] += 1
+        flag = pvd.get("fixAvailable")
+        if isinstance(flag, str) and flag:
+            counts[flag.upper()] += 1
+            continue
+
+        vp = pvd.get("vulnerablePackages") or []
+        has_fix = any((p or {}).get("fixedInVersion") for p in vp)
+        counts["YES" if has_fix else "UNKNOWN"] += 1
+
     for k in ["YES", "NO", "PARTIAL", "UNKNOWN"]:
         counts.setdefault(k, 0)
     return counts
@@ -75,21 +85,42 @@ def print_fix_available_table(counts: Counter):
 def normalize_action_text(txt: str) -> str:
     if not txt:
         return "No official remediation available (manual review)"
-    return " ".join(txt.split())  # collapse whitespace
+    return " ".join(txt.split())
 
 def get_action_text(f: Dict) -> str:
     """
-    Prefer top-level remediation.recommendation.text.
-    If missing/None Provided, fall back to packageVulnerabilityDetails.remediation.
+    Choose the best remediation text:
+      1) finding.remediation.recommendation.text (unless 'None Provided')
+      2) finding.packageVulnerabilityDetails.remediation
+      3) any vulnerablePackages[].remediation
+      4) synthesize from vulnerablePackages fixed versions
     """
+    # 1) top-level recommendation
     rec_text = (((f.get("remediation") or {}).get("recommendation") or {}).get("text") or "").strip()
     if rec_text and rec_text.lower() not in {"none provided", "no recommendation provided"}:
         return rec_text
 
+    # 2) package-level remediation
     pvd = f.get("packageVulnerabilityDetails") or {}
-    pkg_rem = (pvd.get("remediation") or "").strip()
-    if pkg_rem:
-        return pkg_rem
+    pkg_level_rem = (pvd.get("remediation") or "").strip()
+    if pkg_level_rem:
+        return pkg_level_rem
+
+    # 3) per-package remediation
+    vp = pvd.get("vulnerablePackages") or []
+    rems = set()
+    for p in vp:
+        rt = (p or {}).get("remediation")
+        if rt:
+            rems.add(" ".join(rt.split()))
+    if rems:
+        return sorted(rems)[0]  # usually identical; pick one
+
+    # 4) synthesize from fixed versions
+    names = sorted({(p or {}).get("name", "") for p in vp if p})
+    fixed = sorted({(p or {}).get("fixedInVersion", "") for p in vp if p and p.get("fixedInVersion")})
+    if names and fixed:
+        return f"Update packages ({', '.join(n for n in names if n)}) to fixed versions ({', '.join(f for f in fixed if f)})."
 
     return "No official remediation available (manual review)"
 
@@ -133,6 +164,18 @@ def extract_pkg_summary(f: Dict) -> Tuple[str, str, str]:
 
 # ---------- CSV exporter ----------
 
+def infer_fix_available_flag(f: Dict) -> str:
+    """
+    Return the 'best effort' fixAvailable value (YES/NO/PARTIAL/UNKNOWN).
+    """
+    pvd = f.get("packageVulnerabilityDetails") or {}
+    explicit = pvd.get("fixAvailable")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    vp = pvd.get("vulnerablePackages") or []
+    has_fix = any((p or {}).get("fixedInVersion") for p in vp)
+    return "YES" if has_fix else "UNKNOWN"
+
 def write_csv(findings: List[Dict], out_path: str):
     fieldnames = [
         "findingArn",
@@ -156,7 +199,7 @@ def write_csv(findings: List[Dict], out_path: str):
         w.writeheader()
         for f in findings:
             pvd = f.get("packageVulnerabilityDetails") or {}
-            fix_available = (pvd.get("fixAvailable") or "UNKNOWN")
+            fix_available = infer_fix_available_flag(f)
             action_text = get_action_text(f)
             rec_url = (((f.get("remediation") or {}).get("recommendation") or {}).get("url") or "")
             cves = (pvd.get("cvEs") or [])
@@ -214,7 +257,7 @@ def main():
     fa_counts = fix_available_summary(findings)
     print_fix_available_table(fa_counts)
 
-    # Actions table (with fallback logic)
+    # Actions table (with enhanced logic)
     buckets = action_buckets(findings)
     print_actions_table(buckets, top_n=25)
 
