@@ -10,24 +10,25 @@ from botocore.config import Config
 
 SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL", "UNTRIAGED"]
 
-def list_findings_for_instance(inspector2, instance_id: str, region: str) -> List[Dict]:
+# ---------- Inspector fetching ----------
+
+def list_findings_for_instance(inspector2, instance_id: str) -> List[Dict]:
     """
     Retrieves ACTIVE Inspector V2 findings for a specific EC2 instance ID.
+    Uses the proper resourceType and paginates.
     """
     findings = []
     next_token = None
+    base = {
+        "filterCriteria": {
+            "resourceId": [{"comparison": "EQUALS", "value": instance_id}],
+            "resourceType": [{"comparison": "EQUALS", "value": "AWS_EC2_INSTANCE"}],
+            "findingStatus": [{"comparison": "EQUALS", "value": "ACTIVE"}],
+        },
+        "maxResults": 100,
+    }
     while True:
-        params = {
-            "filterCriteria": {
-                "resourceId": [{"comparison": "EQUALS", "value": instance_id}],
-                "resourceType": [{"comparison": "EQUALS", "value": "EC2_INSTANCE"}],
-                "findingStatus": [{"comparison": "EQUALS", "value": "ACTIVE"}],
-            },
-            "maxResults": 100,
-        }
-        if next_token:
-            params["nextToken"] = next_token
-
+        params = dict(base, **({"nextToken": next_token} if next_token else {}))
         resp = inspector2.list_findings(**params)
         findings.extend(resp.get("findings", []))
         next_token = resp.get("nextToken")
@@ -35,71 +36,111 @@ def list_findings_for_instance(inspector2, instance_id: str, region: str) -> Lis
             break
     return findings
 
+# ---------- Summaries & helpers ----------
+
 def severity_summary(findings: List[Dict]) -> Counter:
     counter = Counter()
     for f in findings:
         counter[f.get("severity", "UNTRIAGED")] += 1
-    # Ensure all keys exist (even if zero) for a predictable table
     for s in SEVERITY_ORDER:
         counter.setdefault(s, 0)
     return counter
 
+def print_severity_table(counter: Counter):
+    print("\n== Severity summary ==")
+    total = sum(counter.values())
+    print(f"Total findings: {total}")
+    for s in SEVERITY_ORDER:
+        print(f"  {s:<13} {counter[s]}")
+
+def fix_available_summary(findings: List[Dict]) -> Counter:
+    counts = Counter()
+    for f in findings:
+        pvd = f.get("packageVulnerabilityDetails") or {}
+        val = (pvd.get("fixAvailable") or "UNKNOWN").upper()
+        counts[val] += 1
+    for k in ["YES", "NO", "PARTIAL", "UNKNOWN"]:
+        counts.setdefault(k, 0)
+    return counts
+
+def print_fix_available_table(counts: Counter):
+    print("\n== Fix availability ==")
+    total = sum(counts.values())
+    print(f"Total findings: {total}")
+    print(f"  YES:      {counts['YES']}")
+    print(f"  NO:       {counts['NO']}")
+    print(f"  PARTIAL:  {counts['PARTIAL']}")
+    print(f"  UNKNOWN:  {counts['UNKNOWN']}")
+
 def normalize_action_text(txt: str) -> str:
-    """
-    Try to normalize recommendation text so similar actions group together.
-    This is intentionally conservative; you can enrich later (e.g., strip versions).
-    """
     if not txt:
-        return "No specific recommendation"
-    return " ".join(txt.split())  # collapse spacing
+        return "No official remediation available (manual review)"
+    return " ".join(txt.split())  # collapse whitespace
+
+def get_action_text(f: Dict) -> str:
+    """
+    Prefer top-level remediation.recommendation.text.
+    If missing/None Provided, fall back to packageVulnerabilityDetails.remediation.
+    """
+    rec_text = (((f.get("remediation") or {}).get("recommendation") or {}).get("text") or "").strip()
+    if rec_text and rec_text.lower() not in {"none provided", "no recommendation provided"}:
+        return rec_text
+
+    pvd = f.get("packageVulnerabilityDetails") or {}
+    pkg_rem = (pvd.get("remediation") or "").strip()
+    if pkg_rem:
+        return pkg_rem
+
+    return "No official remediation available (manual review)"
 
 def action_buckets(findings: List[Dict]) -> Dict[str, Counter]:
-    """
-    Group findings by the remediation recommendation text (i.e., the 'action'),
-    counting severities per action.
-    """
     buckets: Dict[str, Counter] = defaultdict(Counter)
     for f in findings:
-        rec = (f.get("remediation") or {}).get("recommendation") or {}
-        action = normalize_action_text(rec.get("text") or "")
+        action = normalize_action_text(get_action_text(f))
         sev = f.get("severity", "UNTRIAGED")
         buckets[action][sev] += 1
-    # ensure severity keys present
     for action in buckets:
         for s in SEVERITY_ORDER:
             buckets[action].setdefault(s, 0)
     return buckets
 
+def print_actions_table(buckets: Dict[str, Counter], top_n: int = 25):
+    print("\n== Top remediation actions (by total findings solved) ==")
+    ranked = sorted(buckets.items(), key=lambda kv: sum(kv[1].values()), reverse=True)
+    if not ranked:
+        print("No actionable recommendations found.")
+        return
+    for i, (action, sev_counts) in enumerate(ranked[:top_n], 1):
+        total = sum(sev_counts.values())
+        print(f"\nAction {i}: {action}")
+        print(f"  Resolves total: {total}")
+        for s in SEVERITY_ORDER:
+            print(f"    {s:<13} {sev_counts[s]}")
+
 def extract_pkg_summary(f: Dict) -> Tuple[str, str, str]:
-    """
-    Pull a concise package summary (name, installed, fixedBy) when available.
-    Many findings are package vulns; if multiple, take a readable aggregate.
-    """
     pvd = f.get("packageVulnerabilityDetails") or {}
     vul_pkgs = pvd.get("vulnerablePackages") or []
     if not vul_pkgs:
         return ("", "", "")
-    # Gather unique names and target versions
     names = sorted({p.get("name") or "" for p in vul_pkgs if p})
-    fixed_bys = sorted({p.get("fixedInVersion") or "" for p in vul_pkgs if p and p.get("fixedInVersion")})
     installed = sorted({p.get("version") or "" for p in vul_pkgs if p})
+    fixed_bys = sorted({p.get("fixedInVersion") or "" for p in vul_pkgs if p and p.get("fixedInVersion")})
     return (
         ";".join([n for n in names if n]),
         ";".join([v for v in installed if v]),
         ";".join([fv for fv in fixed_bys if fv]),
     )
 
+# ---------- CSV exporter ----------
+
 def write_csv(findings: List[Dict], out_path: str):
-    """
-    Write a detailed CSV report of findings.
-    """
     fieldnames = [
         "findingArn",
         "title",
         "severity",
         "inspectorScore",
         "fixAvailable",
-        "recommendation",
+        "actionText",
         "recommendationUrl",
         "cveId",
         "packageNames",
@@ -114,22 +155,23 @@ def write_csv(findings: List[Dict], out_path: str):
         w = csv.DictWriter(fh, fieldnames=fieldnames)
         w.writeheader()
         for f in findings:
-            rem = (f.get("remediation") or {}).get("recommendation") or {}
             pvd = f.get("packageVulnerabilityDetails") or {}
-            cves = pvd.get("cvEs") or []  # list of dicts with id/refs
+            fix_available = (pvd.get("fixAvailable") or "UNKNOWN")
+            action_text = get_action_text(f)
+            rec_url = (((f.get("remediation") or {}).get("recommendation") or {}).get("url") or "")
+            cves = (pvd.get("cvEs") or [])
             cve_id = ";".join(sorted({c.get("id") for c in cves if c and c.get("id")})) if cves else ""
             pkg_names, installed, fixed = extract_pkg_summary(f)
-
-            # Resources often includes the EC2 instance with id, region, etc.
             res = (f.get("resources") or [{}])[0]
+
             row = {
                 "findingArn": f.get("findingArn", ""),
                 "title": f.get("title", ""),
                 "severity": f.get("severity", ""),
                 "inspectorScore": f.get("inspectorScore", ""),
-                "fixAvailable": (pvd.get("fixAvailable") or "UNKNOWN"),
-                "recommendation": rem.get("text", ""),
-                "recommendationUrl": rem.get("url", ""),
+                "fixAvailable": fix_available,
+                "actionText": action_text,
+                "recommendationUrl": rec_url,
                 "cveId": cve_id,
                 "packageNames": pkg_names,
                 "installedVersions": installed,
@@ -141,38 +183,16 @@ def write_csv(findings: List[Dict], out_path: str):
             }
             w.writerow(row)
 
-def print_severity_table(counter: Counter):
-    print("\n== Severity summary ==")
-    total = sum(counter.values())
-    print(f"Total findings: {total}")
-    for s in SEVERITY_ORDER:
-        print(f"  {s:<13} {counter[s]}")
-
-def print_actions_table(buckets: Dict[str, Counter], top_n: int = 25):
-    print("\n== Top remediation actions (by total findings solved) ==")
-    # rank actions by total findings they would address
-    ranked = sorted(
-        buckets.items(),
-        key=lambda kv: sum(kv[1].values()),
-        reverse=True,
-    )
-    if not ranked:
-        print("No actionable recommendations found.")
-        return
-    for i, (action, sev_counts) in enumerate(ranked[:top_n], 1):
-        total = sum(sev_counts.values())
-        print(f"\nAction {i}: {action or 'No specific recommendation'}")
-        print(f"  Resolves total: {total}")
-        for s in SEVERITY_ORDER:
-            print(f"    {s:<13} {sev_counts[s]}")
+# ---------- main ----------
 
 def main():
     parser = argparse.ArgumentParser(description="Generate Inspector v2 vulnerability report for an EC2 instance.")
     parser.add_argument("instance_id", help="EC2 instance ID (e.g., i-0123456789abcdef0)")
-    parser.add_argument("--profile", default=os.getenv("AWS_PROFILE", "mwt-security"), help="AWS named profile to use")
+    parser.add_argument("--profile", default=os.getenv("AWS_PROFILE", "mwt-security"),
+                        help="AWS named profile to use (default: mwt-security)")
     parser.add_argument("--region", default=os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1")),
-                        help="AWS region for Inspector (must match where the instance is scanned)")
-    parser.add_argument("--out", default="inspector_report.csv", help="Path to write the CSV report")
+                        help="AWS region (must match where findings exist)")
+    parser.add_argument("--out", default="inspector_report.csv", help="CSV output path")
     args = parser.parse_args()
 
     session = boto3.Session(profile_name=args.profile, region_name=args.region)
@@ -181,20 +201,24 @@ def main():
     print(f"Using profile '{args.profile}', region '{args.region}'")
     print(f"Fetching ACTIVE Inspector findings for instance: {args.instance_id} ...")
 
-    findings = list_findings_for_instance(inspector2, args.instance_id, args.region)
+    findings = list_findings_for_instance(inspector2, args.instance_id)
     if not findings:
         print("No ACTIVE findings found for this instance.")
         return
 
-    # --- Part 1: Severity summary
+    # Severity table
     sev_counts = severity_summary(findings)
     print_severity_table(sev_counts)
 
-    # --- Part 2: Group by remediation action
+    # Fix availability table
+    fa_counts = fix_available_summary(findings)
+    print_fix_available_table(fa_counts)
+
+    # Actions table (with fallback logic)
     buckets = action_buckets(findings)
     print_actions_table(buckets, top_n=25)
 
-    # --- CSV for deep-dive
+    # CSV
     write_csv(findings, args.out)
     print(f"\nDetailed CSV written to: {args.out}")
 
