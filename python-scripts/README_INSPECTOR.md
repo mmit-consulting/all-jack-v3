@@ -30,6 +30,7 @@ Helpful Flags
 - `--profile`: AWS named profile to use (default: `mwt-security`)
 - `--region`: Inspector v2 region to query (default: `us-east-1`)
 - `--top-n`: Limit the number of actions printed per instance (default: 25). Use `--top-n 0` to show all actions.
+- `--include-severity`: Also show per-severity counts (CRITICAL/HIGH/MEDIUM/LOW/etc.) for each action.
 - `--csv-out`: Write a detailed CSV of raw findings for further analysis. In `--all` mode, writes all findings; in single-instance mode, only that instance’s findings.
 
 Examples
@@ -37,6 +38,8 @@ Examples
   - `python3 python-scripts/inspector_ec2_report.py --all --profile mwt-security --region us-east-1`
 - All instances, show all actions and write a CSV:
   - `python3 python-scripts/inspector_ec2_report.py --all --top-n 0 --csv-out inspector_all.csv`
+- All instances, include per-severity counts per action:
+  - `python3 python-scripts/inspector_ec2_report.py --all --include-severity`
 - Single instance, show all actions and write a CSV:
   - `python3 python-scripts/inspector_ec2_report.py i-0abc123def4567890 --top-n 0 --csv-out inspector_single.csv`
 

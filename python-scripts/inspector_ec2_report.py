@@ -285,6 +285,7 @@ def main():
                         help="AWS region for Inspector (must match where the instance is scanned)")
     parser.add_argument("--csv-out", default=None, help="Optional path to write a detailed CSV of raw findings")
     parser.add_argument("--top-n", type=int, default=25, help="Max actions to display per instance (by impact)")
+    parser.add_argument("--include-severity", action="store_true", help="Also show per-severity counts for each action")
     args = parser.parse_args()
 
     session = boto3.Session(profile_name=args.profile, region_name=args.region)
@@ -323,8 +324,8 @@ def main():
             print("\n" + "=" * 80)
             print(f"Instance: {inst_id} | Account: {account_id} | Findings: {len(inst_findings)}")
             buckets = action_buckets(inst_findings)
-            # Only print totals per action for clarity
-            print_actions_table(buckets, top_n=args.top_n, totals_only=True)
+            # Totals by default; include per-severity if requested
+            print_actions_table(buckets, top_n=args.top_n, totals_only=(not args.include_severity))
 
         # Optional CSV of all findings
         if args.csv_out:
@@ -344,7 +345,7 @@ def main():
         buckets = action_buckets(findings)
         print("\n" + "=" * 80)
         print(f"Instance: {args.instance_id} | Account: n/a (single-instance mode)")
-        print_actions_table(buckets, top_n=args.top_n, totals_only=True)
+        print_actions_table(buckets, top_n=args.top_n, totals_only=(not args.include_severity))
 
         if args.csv_out:
             write_csv(findings, args.csv_out)
