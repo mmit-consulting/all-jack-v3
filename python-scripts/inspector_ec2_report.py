@@ -59,8 +59,14 @@ def list_all_active_ec2_findings(inspector2, verbose: bool = False) -> List[Dict
     while True:
         params = {
             "filterCriteria": {
+<<<<<<< HEAD
                 "resourceType": [{"comparison": "EQUALS", "value": "AWS_EC2_INSTANCE"}],
                 "findingStatus": [{"comparison": "EQUALS", "value": "ACTIVE"}],
+=======
+            "resourceId": [{"comparison": "EQUALS", "value": instance_id}],
+            "resourceType": [{"comparison": "EQUALS", "value": "AWS_EC2_INSTANCE"}],
+            "findingStatus": [{"comparison": "EQUALS", "value": "ACTIVE"}],
+>>>>>>> 27966facfbcd0e23539eca572008f24eda2f1259
             },
             "maxResults": 100,
         }
