@@ -12,7 +12,12 @@ SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL", "UNTRIAG
 
 # ---------- Inspector fetching ----------
 
-def list_findings_for_instance(inspector2, instance_id: str) -> List[Dict]:
+def _dbg(msg: str, verbose: bool):
+    if verbose:
+        print(msg, flush=True)
+
+
+def list_findings_for_instance(inspector2, instance_id: str, verbose: bool = False) -> List[Dict]:
     """
     Retrieves ACTIVE Inspector V2 findings for a specific EC2 instance ID.
     """
@@ -26,26 +31,35 @@ def list_findings_for_instance(inspector2, instance_id: str) -> List[Dict]:
         },
         "maxResults": 100,
     }
+    page = 0
+    _dbg(f"[single] Start listing findings for {instance_id}", verbose)
     while True:
         params = dict(base, **({"nextToken": next_token} if next_token else {}))
+        page += 1
+        _dbg(f"[single] Calling list_findings page {page} ...", verbose)
         resp = inspector2.list_findings(**params)
+        got = len(resp.get("findings", []))
         findings.extend(resp.get("findings", []))
+        _dbg(f"[single] Page {page} returned {got}, total so far {len(findings)}", verbose)
         next_token = resp.get("nextToken")
         if not next_token:
             break
+    _dbg(f"[single] Completed. Total findings: {len(findings)}", verbose)
     return findings
 
-def list_all_active_ec2_findings(inspector2) -> List[Dict]:
+def list_all_active_ec2_findings(inspector2, verbose: bool = False) -> List[Dict]:
     """
     Retrieves all ACTIVE Inspector V2 findings for EC2 instances across the
     account/organization the configured profile can see.
     """
     findings: List[Dict] = []
     next_token = None
+    page = 0
+    _dbg("[all] Start listing ACTIVE EC2 findings", verbose)
     while True:
         params = {
             "filterCriteria": {
-                "resourceType": [{"comparison": "EQUALS", "value": "EC2_INSTANCE"}],
+                "resourceType": [{"comparison": "EQUALS", "value": "AWS_EC2_INSTANCE"}],
                 "findingStatus": [{"comparison": "EQUALS", "value": "ACTIVE"}],
             },
             "maxResults": 100,
@@ -53,11 +67,16 @@ def list_all_active_ec2_findings(inspector2) -> List[Dict]:
         if next_token:
             params["nextToken"] = next_token
 
+        page += 1
+        _dbg(f"[all] Calling list_findings page {page} ...", verbose)
         resp = inspector2.list_findings(**params)
+        got = len(resp.get("findings", []))
         findings.extend(resp.get("findings", []))
+        _dbg(f"[all] Page {page} returned {got}, total so far {len(findings)}", verbose)
         next_token = resp.get("nextToken")
         if not next_token:
             break
+    _dbg(f"[all] Completed listing. Total findings: {len(findings)}", verbose)
     return findings
 
 def severity_summary(findings: List[Dict]) -> Counter:
@@ -286,6 +305,7 @@ def main():
     parser.add_argument("--csv-out", default=None, help="Optional path to write a detailed CSV of raw findings")
     parser.add_argument("--top-n", type=int, default=25, help="Max actions to display per instance (by impact)")
     parser.add_argument("--include-severity", action="store_true", help="Also show per-severity counts for each action")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Print progress while fetching and processing")
     args = parser.parse_args()
 
     session = boto3.Session(profile_name=args.profile, region_name=args.region)
@@ -294,8 +314,8 @@ def main():
     print(f"Using profile '{args.profile}', region '{args.region}'")
 
     if args.all:
-        print("Fetching ACTIVE Inspector findings for ALL EC2 instances ...")
-        all_findings = list_all_active_ec2_findings(inspector2)
+        print("Fetching ACTIVE Inspector findings for ALL EC2 instances ...", flush=True)
+        all_findings = list_all_active_ec2_findings(inspector2, verbose=args.verbose)
         if not all_findings:
             print("No ACTIVE EC2 findings found.")
             return
@@ -306,7 +326,8 @@ def main():
             resources = f.get("resources") or []
             inst_id = None
             for r in resources:
-                if (r.get("type") or "").upper() == "EC2_INSTANCE" and r.get("id"):
+                rtype = (r.get("type") or "").upper()
+                if rtype in {"EC2_INSTANCE", "AWS_EC2_INSTANCE"} and r.get("id"):
                     inst_id = r.get("id")
                     break
             if not inst_id:
@@ -319,10 +340,12 @@ def main():
             grouped[(inst_id, account_id)].append(f)
 
         # Print section per instance
-        for (inst_id, account_id) in sorted(grouped.keys(), key=lambda k: (k[1], k[0])):
+        total_instances = len(grouped)
+        _dbg(f"[all] Grouped into {total_instances} instances", args.verbose)
+        for idx, (inst_id, account_id) in enumerate(sorted(grouped.keys(), key=lambda k: (k[1], k[0])), start=1):
             inst_findings = grouped[(inst_id, account_id)]
             print("\n" + "=" * 80)
-            print(f"Instance: {inst_id} | Account: {account_id} | Findings: {len(inst_findings)}")
+            print(f"[{idx}/{total_instances}] Instance: {inst_id} | Account: {account_id} | Findings: {len(inst_findings)}", flush=True)
             buckets = action_buckets(inst_findings)
             # Totals by default; include per-severity if requested
             print_actions_table(buckets, top_n=args.top_n, totals_only=(not args.include_severity))
@@ -335,8 +358,8 @@ def main():
     else:
         if not args.instance_id:
             parser.error("Provide an instance_id or use --all to process all instances")
-        print(f"Fetching ACTIVE Inspector findings for instance: {args.instance_id} ...")
-        findings = list_findings_for_instance(inspector2, args.instance_id, args.region)
+        print(f"Fetching ACTIVE Inspector findings for instance: {args.instance_id} ...", flush=True)
+        findings = list_findings_for_instance(inspector2, args.instance_id, verbose=args.verbose)
         if not findings:
             print("No ACTIVE findings found for this instance.")
             return
