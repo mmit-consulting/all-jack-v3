@@ -49,4 +49,42 @@ iam_generic_roles = {
       Env   = "dev"
     }
   }
+
+    dev_ops_role = {
+    role_name = "DevOpsUtilityRole"
+    trusted_services = [
+      "ec2.amazonaws.com"
+    ]
+    custom_policy_paths = [
+      "./policies/devops-policy.json"
+    ]
+    aws_managed_policy_arns = [
+      "arn:aws:iam::aws:policy/AWSCodeBuildDeveloperAccess"
+    ]
+    create_inline_policy      = true
+    custom_inline_policy_path = "./policies/devops-inline.json"
+    tags = {
+      Owner = "devops"
+      Env   = "dev"
+    }
+  }
+    aig_streaming = {
+    role_name = "aig-streaming"
+
+    trusted_services = [
+      "ecs-tasks.amazonaws.com"
+    ]
+
+    trust_policy_conditions = []
+
+    custom_policy_paths = []
+
+    aws_managed_policy_arns = []
+
+    create_inline_policy      = true
+    custom_inline_policy_path = "./policies/aig-streaming-inline.json"
+
+    tags = {
+    }
+  }
 }

@@ -31,6 +31,7 @@ Helpful Flags
 - `--region`: Inspector v2 region to query (default: `us-east-1`)
 - `--top-n`: Limit the number of actions printed per instance (default: 25). Use `--top-n 0` to show all actions.
 - `--include-severity`: Also show per-severity counts (CRITICAL/HIGH/MEDIUM/LOW/etc.) for each action.
+- `--verbose` or `-v`: Print progress during pagination, grouping, and per-instance processing.
 - `--csv-out`: Write a detailed CSV of raw findings for further analysis. In `--all` mode, writes all findings; in single-instance mode, only that instance’s findings.
 
 Examples

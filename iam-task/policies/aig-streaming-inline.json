@@ -1,0 +1,29 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3ListBucketsForML",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
+      "Resource": ["arn:aws:s3:::com.hoopladigital.ml.*"]
+    },
+    {
+      "Sid": "S3ReadWriteObjectsForML",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": ["arn:aws:s3:::com.hoopladigital.ml.*/*"]
+    },
+    {
+      "Sid": "SSMReadClickstreamParams",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameter",
+        "ssm:GetParameters",
+        "ssm:GetParametersByPath"
+      ],
+      "Resource": [
+        "arn:aws:ssm:*:*:parameter/development/dsg_clickstream_service/*"
+      ]
+    }
+  ]
+}
