@@ -1,0 +1,5 @@
+region          = "us-east-1"
+bucket_name     = "mwt.log.trail.testsally"
+org_id          = "oc3rtgmpo8"
+mgmt_account_id = "271563910642"
+trail_arn       = "arn:aws:cloudtrail:us-east-1:271563910642:trail/org-central-trail"
