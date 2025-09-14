@@ -3,11 +3,10 @@ import argparse
 import csv
 import os
 from collections import Counter, defaultdict
-from typing import Dict, List, Tuple, Iterable
+from typing import Dict, List, Tuple
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError
 
 SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL", "UNTRIAGED"]
 
@@ -16,61 +15,6 @@ SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL", "UNTRIAG
 def _dbg(msg: str, verbose: bool):
     if verbose:
         print(msg, flush=True)
-
-# ---------- Helpers ----------
-
-def _chunks(seq: Iterable[str], size: int) -> Iterable[List[str]]:
-    chunk: List[str] = []
-    for x in seq:
-        chunk.append(x)
-        if len(chunk) >= size:
-            yield chunk
-            chunk = []
-    if chunk:
-        yield chunk
-
-def get_instance_names(ec2, instance_ids: List[str], verbose: bool = False) -> Dict[str, str]:
-    """
-    Returns a mapping {instance_id: 'Name tag value'}.
-    Missing or inaccessible IDs map to "" (empty string).
-    """
-    names: Dict[str, str] = {iid: "" for iid in instance_ids}
-    if not instance_ids:
-        return names
-
-    for batch in _chunks(sorted(set(instance_ids)), 200):
-        try:
-            resp = ec2.describe_instances(InstanceIds=batch)
-        except ClientError as e:
-            # Some IDs might be terminated or from another region; try individually to salvage others
-            _dbg(f"[names] Batch describe failed: {e}", verbose)
-            for iid in batch:
-                try:
-                    r2 = ec2.describe_instances(InstanceIds=[iid])
-                    for res in r2.get("Reservations", []):
-                        for inst in res.get("Instances", []):
-                            tag_name = ""
-                            for t in inst.get("Tags", []) or []:
-                                if t.get("Key") == "Name":
-                                    tag_name = t.get("Value") or ""
-                                    break
-                            names[iid] = tag_name
-                except ClientError as e2:
-                    _dbg(f"[names] Unable to get name for {iid}: {e2}", verbose)
-            continue
-
-        for res in resp.get("Reservations", []):
-            for inst in res.get("Instances", []):
-                iid = inst.get("InstanceId")
-                if not iid:
-                    continue
-                tag_name = ""
-                for t in inst.get("Tags", []) or []:
-                    if t.get("Key") == "Name":
-                        tag_name = t.get("Value") or ""
-                        break
-                names[iid] = tag_name
-    return names
 
 # ---------- Inspector fetching ----------
 
@@ -147,6 +91,7 @@ def severity_summary(findings: List[Dict]) -> Counter:
         counter.setdefault(s, 0)
     return counter
 
+
 def fix_available_summary(findings: List[Dict]) -> Counter:
     """
     Prefer packageVulnerabilityDetails.fixAvailable, otherwise infer:
@@ -168,10 +113,12 @@ def fix_available_summary(findings: List[Dict]) -> Counter:
         counts.setdefault(k, 0)
     return counts
 
+
 def normalize_action_text(txt: str) -> str:
     if not txt:
         return "No official remediation available (manual review)"
     return " ".join(txt.split())
+
 
 def get_action_text(f: Dict) -> str:
     """
@@ -210,6 +157,7 @@ def get_action_text(f: Dict) -> str:
 
     return "No official remediation available (manual review)"
 
+
 def action_buckets(findings: List[Dict]) -> Dict[str, Counter]:
     buckets: Dict[str, Counter] = defaultdict(Counter)
     for f in findings:
@@ -237,6 +185,7 @@ def extract_pkg_summary(f: Dict) -> Tuple[str, str, str]:
         ";".join([fv for fv in fixed_bys if fv]),
     )
 
+
 def infer_fix_available_flag(f: Dict) -> str:
     """
     Return the 'best effort' fixAvailable value (YES/NO/PARTIAL/UNKNOWN).
@@ -249,10 +198,8 @@ def infer_fix_available_flag(f: Dict) -> str:
     has_fix = any((p or {}).get("fixedInVersion") for p in vp)
     return "YES" if has_fix else "UNKNOWN"
 
-def write_csv(findings: List[Dict], out_path: str, instance_names: Dict[str, str] | None = None):
-    """
-    Detailed CSV: one row per finding, includes instance_id and instance_name.
-    """
+
+def write_csv(findings: List[Dict], out_path: str):
     fieldnames = [
         "findingArn",
         "title",
@@ -266,16 +213,14 @@ def write_csv(findings: List[Dict], out_path: str, instance_names: Dict[str, str
         "installedVersions",
         "fixedInVersions",
         "resourceId",
-        "instance_name",
         "resourceRegion",
         "firstObservedAt",
         "lastObservedAt",
     ]
+    # ensure folder exists
     folder = os.path.dirname(os.path.abspath(out_path))
     if folder:
         os.makedirs(folder, exist_ok=True)
-
-    lookup = instance_names or {}
 
     with open(out_path, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=fieldnames)
@@ -289,7 +234,7 @@ def write_csv(findings: List[Dict], out_path: str, instance_names: Dict[str, str
             cve_id = ";".join(sorted({c.get("id") for c in cves if c and c.get("id")})) if cves else ""
             pkg_names, installed, fixed = extract_pkg_summary(f)
             res = (f.get("resources") or [{}])[0]
-            inst_id = res.get("id", "")
+
             row = {
                 "findingArn": f.get("findingArn", ""),
                 "title": f.get("title", ""),
@@ -302,27 +247,26 @@ def write_csv(findings: List[Dict], out_path: str, instance_names: Dict[str, str
                 "packageNames": pkg_names,
                 "installedVersions": installed,
                 "fixedInVersions": fixed,
-                "resourceId": inst_id,
-                "instance_name": lookup.get(inst_id, ""),
+                "resourceId": res.get("id", ""),
                 "resourceRegion": res.get("region", ""),
                 "firstObservedAt": f.get("firstObservedAt", ""),
                 "lastObservedAt": f.get("lastObservedAt", ""),
             }
             w.writerow(row)
 
-def build_instance_summary_rows(grouped: Dict[Tuple[str, str], List[Dict]], instance_names: Dict[str, str]) -> List[Dict]:
+
+def build_instance_summary_rows(grouped: Dict[Tuple[str, str], List[Dict]]) -> List[Dict]:
     """
-    One row per instance/account with severity counts and number of actions.
-    Columns: account_id, instance_id, instance_name, total_vulnerabilities, critical, high, medium, low, actions_detected
+    Build one row per instance/account with severity counts and number of actions.
+    Columns: account_id, instance_id, total_vulnerabilities, critical, high, medium, low, actions_detected
     """
     rows = []
     for (inst_id, account_id), inst_findings in grouped.items():
-        sev = severity_summary(inst_findings)
+        sev = severity_summary(inst_findings)  # ensures keys exist for all severities
         buckets = action_buckets(inst_findings)
         rows.append({
             "account_id": account_id,
             "instance_id": inst_id,
-            "instance_name": instance_names.get(inst_id, ""),
             "total_vulnerabilities": sum(sev.values()),
             "critical": sev.get("CRITICAL", 0),
             "high": sev.get("HIGH", 0),
@@ -332,11 +276,11 @@ def build_instance_summary_rows(grouped: Dict[Tuple[str, str], List[Dict]], inst
         })
     return rows
 
+
 def write_instance_summary_csv(rows: List[Dict], out_path: str):
     fieldnames = [
         "account_id",
         "instance_id",
-        "instance_name",
         "total_vulnerabilities",
         "critical",
         "high",
@@ -362,6 +306,7 @@ def print_severity_table(counter: Counter):
     print(f"Total findings: {total}")
     for s in SEVERITY_ORDER:
         print(f"  {s:<13} {counter[s]}")
+
 
 def print_actions_table(buckets: Dict[str, Counter], top_n: int = 25, totals_only: bool = False):
     print("\n== Top remediation actions (by total findings solved) ==")
@@ -396,7 +341,6 @@ def main():
 
     session = boto3.Session(profile_name=args.profile, region_name=args.region)
     inspector2 = session.client("inspector2", config=Config(retries={"max_attempts": 10, "mode": "standard"}))
-    ec2 = session.client("ec2", config=Config(retries={"max_attempts": 10, "mode": "standard"}))
 
     print(f"Using profile '{args.profile}', region '{args.region}'")
 
@@ -409,7 +353,6 @@ def main():
 
         # Group findings by (instance_id, account_id)
         grouped: Dict[Tuple[str, str], List[Dict]] = defaultdict(list)
-        all_instance_ids: List[str] = []
         for f in all_findings:
             resources = f.get("resources") or []
             inst_id = None
@@ -424,33 +367,24 @@ def main():
                 continue
             account_id = f.get("awsAccountId") or (resources[0].get("accountId") if resources else None) or "unknown-account"
             grouped[(inst_id, account_id)].append(f)
-            all_instance_ids.append(inst_id)
 
-        # Resolve names
-        instance_names = get_instance_names(ec2, all_instance_ids, verbose=args.verbose)
-
-        # Print section per instance (now with instance name)
+        # Print section per instance
         total_instances = len(grouped)
         _dbg(f"[all] Grouped into {total_instances} instances", args.verbose)
         for idx, (inst_id, account_id) in enumerate(sorted(grouped.keys(), key=lambda k: (k[1], k[0])), start=1):
             inst_findings = grouped[(inst_id, account_id)]
-            name = instance_names.get(inst_id, "")
-            header = f"[{idx}/{total_instances}] Instance: {inst_id}"
-            if name:
-                header += f" ({name})"
-            header += f" | Account: {account_id} | Findings: {len(inst_findings)}"
             print("\n" + "=" * 80)
-            print(header, flush=True)
+            print(f"[{idx}/{total_instances}] Instance: {inst_id} | Account: {account_id} | Findings: {len(inst_findings)}", flush=True)
             buckets = action_buckets(inst_findings)
             print_actions_table(buckets, top_n=args.top_n, totals_only=(not args.include_severity))
 
         # Optional CSVs
         if args.csv_out:
-            write_csv(all_findings, args.csv_out, instance_names=instance_names)
+            write_csv(all_findings, args.csv_out)
             print(f"\nDetailed CSV written to: {args.csv_out}")
 
         if args.summary_csv:
-            summary_rows = build_instance_summary_rows(grouped, instance_names)
+            summary_rows = build_instance_summary_rows(grouped)
             write_instance_summary_csv(summary_rows, args.summary_csv)
             print(f"Instance summary CSV written to: {args.summary_csv}")
 
@@ -463,23 +397,15 @@ def main():
             print("No ACTIVE findings found for this instance.")
             return
 
-        # Resolve single instance name
-        instance_names = get_instance_names(ec2, [args.instance_id], verbose=args.verbose)
-        name = instance_names.get(args.instance_id, "")
-
         # Print actions
         buckets = action_buckets(findings)
         print("\n" + "=" * 80)
-        header = f"Instance: {args.instance_id}"
-        if name:
-            header += f" ({name})"
-        header += " | Account: n/a (single-instance mode)"
-        print(header)
+        print(f"Instance: {args.instance_id} | Account: n/a (single-instance mode)")
         print_actions_table(buckets, top_n=args.top_n, totals_only=(not args.include_severity))
 
         # Optional CSVs
         if args.csv_out:
-            write_csv(findings, args.csv_out, instance_names=instance_names)
+            write_csv(findings, args.csv_out)
             print(f"\nDetailed CSV written to: {args.csv_out}")
 
         if args.summary_csv:
@@ -490,7 +416,6 @@ def main():
             row = {
                 "account_id": account_id,
                 "instance_id": args.instance_id,
-                "instance_name": name,
                 "total_vulnerabilities": sum(sev.values()),
                 "critical": sev.get("CRITICAL", 0),
                 "high": sev.get("HIGH", 0),
