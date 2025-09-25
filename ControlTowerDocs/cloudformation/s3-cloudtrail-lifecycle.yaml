@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: S3 lifecycle for CloudTrail logs (3y retention, 30d -> Intelligent-Tiering)
+
+Parameters:
+  BucketName:      { Type: String }
+  TransitionDays:  { Type: Number, Default: 30 }
+  ExpireDays:      { Type: Number, Default: 1095 }
+
+Resources:
+  CloudTrailLifecycle:
+    Type: AWS::S3::BucketLifecycleConfiguration
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Bucket: !Ref BucketName
+      LifecycleConfiguration:
+        Rules:
+          - Id: CloudTrail-3y
+            Status: Enabled
+            # CloudTrail objects live under AWSLogs/<acct>/CloudTrail/...
+            Filter: { Prefix: 'AWSLogs/' }
+            Transitions:
+              - TransitionInDays: !Ref TransitionDays
+                StorageClass: INTELLIGENT_TIERING
+            ExpirationInDays: !Ref ExpireDays

@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: S3 lifecycle for AWS Config logs (3y retention, 30d -> Intelligent-Tiering)
+
+Parameters:
+  BucketName:      { Type: String }
+  TransitionDays:  { Type: Number, Default: 30 }
+  ExpireDays:      { Type: Number, Default: 1095 }
+
+Resources:
+  ConfigLifecycle:
+    Type: AWS::S3::BucketLifecycleConfiguration
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Bucket: !Ref BucketName
+      LifecycleConfiguration:
+        Rules:
+          - Id: Config-3y
+            Status: Enabled
+            # Config delivery is under AWSLogs/Config/...
+            Filter: { Prefix: 'AWSLogs/Config/' }
+            Transitions:
+              - TransitionInDays: !Ref TransitionDays
+                StorageClass: INTELLIGENT_TIERING
+            ExpirationInDays: !Ref ExpireDays

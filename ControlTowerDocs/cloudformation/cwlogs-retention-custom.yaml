@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Set retention on an existing CloudWatch Logs log group
+
+Parameters:
+  LogGroupName:    { Type: String }
+  RetentionInDays: { Type: Number, Default: 365 }
+
+Resources:
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: Retention
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: logs:PutRetentionPolicy
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  Fn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt Role.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3, cfnresponse
+          logs = boto3.client('logs')
+          def handler(event, context):
+              try:
+                  if event.get('RequestType') == 'Delete':
+                      # Safe: do not revert retention on delete
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                  p = event['ResourceProperties']
+                  logs.put_retention_policy(
+                      logGroupName=p['LogGroupName'],
+                      retentionInDays=int(p['RetentionInDays'])
+                  )
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'error': str(e)})
+
+  ApplyRetention:
+    Type: Custom::ApplyRetention
+    Properties:
+      ServiceToken: !GetAtt Fn.Arn
+      LogGroupName: !Ref LogGroupName
+      RetentionInDays: !Ref RetentionInDays
