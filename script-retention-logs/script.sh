@@ -8,7 +8,7 @@ set -euo pipefail
 # If not provided, it defaults to 90 days.
 RETENTION_DAYS="${1:-90}"
 
-# We only work in us-east-1 as per your context.
+# We only work in us-east-1
 REGION="us-east-1"
 
 # Check if AWS credentials are available.
