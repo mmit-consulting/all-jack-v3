@@ -4,6 +4,9 @@
 # and make pipelines fail if any command fails (-o pipefail).
 set -euo pipefail
 
+# prevent Git Bash from rewriting /aws/... into C:\Program Files\Git\aws\...
+export MSYS2_ARG_CONV_EXCL='*'   # <<< changed
+
 # The retention days can be passed as the first argument when running the script.
 # If not provided, it defaults to 90 days.
 RETENTION_DAYS="${1:-90}"
@@ -46,16 +49,21 @@ fi
 
 # Loop through each log group name returned above.
 for LG in $LOG_GROUPS; do
+  # Trim carriage returns and whitespace from the log group name
+  CLEAN_LG=$(echo "$LG" | tr -d '\r' | xargs)
+
+  [[ -z "$CLEAN_LG" ]] && continue
+
   echo "Setting ${RETENTION_DAYS} days on: ${LG}"
 
   # Apply the retention policy using AWS CLI.
-  aws logs put-retention-policy \
+  MSYS2_ARG_CONV_EXCL='*' aws logs put-retention-policy \
     --region "$REGION" \
-    --log-group-name "$LG" \
+    --log-group-name "$CLEAN_LG" \
     --retention-in-days "$RETENTION_DAYS"
 
   # Record the action in the CSV report.
-  echo "${AWS_PROFILE:-env},${REGION},set,${LG},retention=${RETENTION_DAYS}" >> "$REPORT"
+  echo "${AWS_PROFILE:-env},${REGION},set,${CLEAN_LG},retention=${RETENTION_DAYS}" >> "$REPORT"
 done
 
 echo
