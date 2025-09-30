@@ -1,0 +1,72 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Enforce CloudWatch Logs retention only when missing (Config rule + SSM auto-remediation)
+
+Parameters:
+  MaxRetentionDays:              # This is the Config rule parameter (we will set it to 3653 via StackSet)
+    Type: Number
+    Default: 3653
+    Description: Only groups with no retention will be non-compliant if set to 3653 (10 years)
+  DefaultRetentionToApply:       # This is what the remediation will SET (e.g., 90 days)
+    Type: Number
+    Default: 90
+    Description: Default retention the remediation will apply to non-compliant groups
+
+Resources:
+  CloudWatchRetentionRule:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName: cloudwatch-log-group-retention-check
+      Description: Ensure all log groups have retention; only "no retention" is non-compliant when maxRetentionDays=3653
+      InputParameters:
+        maxRetentionDays: !Ref MaxRetentionDays
+      Scope:
+        ComplianceResourceTypes:
+          - "AWS::Logs::LogGroup"
+      Source:
+        Owner: AWS
+        SourceIdentifier: CLOUDWATCH_LOG_GROUP_RETENTION_PERIOD_CHECK
+
+  RemediationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cw-retention-remediator
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ssm.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole
+      Policies:
+        - PolicyName: PutRetentionPolicyLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                  - logs:PutRetentionPolicy
+                Resource: "*"
+
+  RetentionRemediation:
+    Type: AWS::Config::RemediationConfiguration
+    Properties:
+      ConfigRuleName: !Ref CloudWatchRetentionRule
+      TargetId: AWSConfigRemediation-SetCloudWatchLogGroupRetention
+      TargetType: SSM_DOCUMENT
+      TargetVersion: "1"
+      Automatic: true
+      MaximumAutomaticAttempts: 3
+      RetryAttemptSeconds: 60
+      Parameters:
+        LogGroupName:
+          ResourceValue:
+            Value: RESOURCE_ID
+        RetentionInDays:
+          StaticValue:
+            Values: [ !Ref DefaultRetentionToApply ]   # ← set to 90 by TF parameters below
+        AutomationAssumeRole:
+          StaticValue:
+            Values: [ !GetAtt RemediationRole.Arn ]
