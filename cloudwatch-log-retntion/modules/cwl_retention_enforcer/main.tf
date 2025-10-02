@@ -3,7 +3,7 @@
 data "archive_file" "lambda_zip" {
   type        = "zip"
   source_dir  = var.lambda_source_dir
-  output_path = "${path.module}/build/cwl_retention_rule.zip"
+  output_path = "${path.module}/cwl_retention_rule.zip"
 }
 
 # ---------- Lambda IAM ----------
@@ -148,19 +148,24 @@ resource "aws_config_remediation_configuration" "retention_fix" {
   target_id        = "AWSConfigRemediation-SetCloudWatchLogGroupRetention"
   automatic        = true
 
+  resource_type = "AWS::Logs::LogGroup"
+
   maximum_automatic_attempts = 3
   retry_attempt_seconds      = 60
 
+  # Pull the evaluated resource id (the log group name) at runtime
   parameter {
     name           = "LogGroupName"
     resource_value = "RESOURCE_ID"
   }
 
+  # desired default retention (string per SSM doc parameter type)
   parameter {
     name         = "RetentionInDays"
     static_value = tostring(var.default_retention_days)
   }
 
+  # Role the Automation will assume to call PutRetentionPolicy
   parameter {
     name         = "AutomationAssumeRole"
     static_value = aws_iam_role.remediator.arn
