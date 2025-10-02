@@ -164,7 +164,7 @@ resource "aws_ssm_document" "set_cwl_retention" {
       - name: SetRetention
         action: aws:executeScript
         inputs:
-          Runtime: python3.8
+          Runtime: python3.10
           Handler: handler
           InputPayload:
             LogGroupName: "{{ LogGroupName }}"
