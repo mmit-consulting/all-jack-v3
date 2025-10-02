@@ -83,8 +83,6 @@ resource "aws_config_config_rule" "rule" {
     source_detail {
       event_source = "aws.config"
       message_type = "ConfigurationItemChangeNotification"
-      # optional:
-      maximum_execution_frequency = var.maximum_execution_frequency
     }
 
     # Periodic: sweep all groups
@@ -142,30 +140,72 @@ resource "aws_iam_role_policy_attachment" "attach_logs_put_retention" {
 }
 
 # ---------- Auto-remediation wiring (SSM Automation runbook) ----------
+# Custom runbook that sets retention on a log group
+resource "aws_ssm_document" "set_cwl_retention" {
+  name            = "CWL-SetLogGroupRetention"
+  document_type   = "Automation"
+  document_format = "YAML"
+
+  content = <<-YAML
+    schemaVersion: '0.3'
+    description: Set CloudWatch Log Group retention
+    assumeRole: "{{ AutomationAssumeRole }}"
+    parameters:
+      LogGroupName:
+        type: String
+        description: Name of the CloudWatch Log Group
+      RetentionInDays:
+        type: String
+        description: Retention in days
+      AutomationAssumeRole:
+        type: String
+        description: IAM role that allows executing PutRetentionPolicy
+    mainSteps:
+      - name: SetRetention
+        action: aws:executeScript
+        inputs:
+          Runtime: python3.8
+          Handler: handler
+          InputPayload:
+            LogGroupName: "{{ LogGroupName }}"
+            RetentionInDays: "{{ RetentionInDays }}"
+          Script: |
+            import boto3, json
+            logs = boto3.client("logs")
+            def handler(event, ctx):
+                name = event["LogGroupName"]
+                days = int(event["RetentionInDays"])
+                logs.put_retention_policy(logGroupName=name, retentionInDays=days)
+                return {"status": "OK", "logGroupName": name, "retentionInDays": days}
+  YAML
+}
+
+
 resource "aws_config_remediation_configuration" "retention_fix" {
   config_rule_name = aws_config_config_rule.rule.name
   target_type      = "SSM_DOCUMENT"
-  target_id        = "AWSConfigRemediation-SetCloudWatchLogGroupRetention"
+  target_id        = aws_ssm_document.set_cwl_retention.name # <— use the custom doc
   automatic        = true
 
+  # Optional clarity; Config can infer it from the rule evaluation
   resource_type = "AWS::Logs::LogGroup"
 
   maximum_automatic_attempts = 3
   retry_attempt_seconds      = 60
 
-  # Pull the evaluated resource id (the log group name) at runtime
+  # Pass the evaluated resource id (the log group name)
   parameter {
     name           = "LogGroupName"
     resource_value = "RESOURCE_ID"
   }
 
-  # desired default retention (string per SSM doc parameter type)
+  # Default retention (string)
   parameter {
     name         = "RetentionInDays"
     static_value = tostring(var.default_retention_days)
   }
 
-  # Role the Automation will assume to call PutRetentionPolicy
+  # Role Automation will assume (already created in your module)
   parameter {
     name         = "AutomationAssumeRole"
     static_value = aws_iam_role.remediator.arn
@@ -173,6 +213,7 @@ resource "aws_config_remediation_configuration" "retention_fix" {
 
   depends_on = [
     aws_iam_role_policy_attachment.ssm_automation_managed,
-    aws_iam_role_policy_attachment.attach_logs_put_retention
+    aws_iam_role_policy_attachment.attach_logs_put_retention,
+    aws_ssm_document.set_cwl_retention
   ]
 }
