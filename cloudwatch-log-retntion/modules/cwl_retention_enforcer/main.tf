@@ -266,7 +266,6 @@ resource "aws_config_remediation_configuration" "retention_fix" {
 # resource "aws_sns_topic" "this"
 # resource "aws_sns_topic_subscription" "email_subscriptions"
 # resource "aws_sns_topic_policy" "allow_eventbridge_publish"
-# --- Replace your aws_sns_* resources with this module ---
 module "cwl_retention_notifications" {
   source  = "terraform-aws-modules/sns/aws"
   version = "~> 5.0"
