@@ -42,3 +42,8 @@ variable "lambda_source_dir" {
   type        = string
   default     = "${path.module}/lambda"
 }
+
+
+variable "notification_emails" {
+  type = any
+}

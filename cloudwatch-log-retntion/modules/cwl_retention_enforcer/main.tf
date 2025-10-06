@@ -1,74 +1,117 @@
 
-# ---------- Package Lambda code from a separate python file ----------
-data "archive_file" "lambda_zip" {
-  type        = "zip"
-  source_dir  = var.lambda_source_dir
-  output_path = "${path.module}/cwl_retention_rule.zip"
-}
+# # ---------- Package Lambda code from a separate python file ----------
+# data "archive_file" "lambda_zip" {
+#   type        = "zip"
+#   source_dir  = var.lambda_source_dir
+#   output_path = "${path.module}/cwl_retention_rule.zip"
+# }
 
-# ---------- Lambda IAM ----------
-resource "aws_iam_role" "lambda_role" {
-  name = var.lambda_role_name
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect : "Allow"
-        Principal : {
-          Service : "lambda.amazonaws.com"
-        }
-        Action : "sts:AssumeRole"
-      }
-    ]
-  })
-}
+# # ---------- Lambda IAM ----------
+# resource "aws_iam_role" "lambda_role" {
+#   name = var.lambda_role_name
+#   assume_role_policy = jsonencode({
+#     Version = "2012-10-17"
+#     Statement = [
+#       {
+#         Effect : "Allow"
+#         Principal : {
+#           Service : "lambda.amazonaws.com"
+#         }
+#         Action : "sts:AssumeRole"
+#       }
+#     ]
+#   })
+# }
 
-resource "aws_iam_role_policy_attachment" "lambda_basic" {
-  role       = aws_iam_role.lambda_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
+# resource "aws_iam_role_policy_attachment" "lambda_basic" {
+#   role       = aws_iam_role.lambda_role.name
+#   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+# }
 
-resource "aws_iam_policy" "lambda_api" {
-  name = "lambda-cwl-describe-puteval"
-  policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [
-      {
-        Effect : "Allow"
-        Action : ["logs:DescribeLogGroups"]
-        Resource : "*"
-      },
-      {
-        Effect : "Allow"
-        Action : ["config:PutEvaluations"]
-        Resource : "*"
-      }
-    ]
-  })
-}
+# resource "aws_iam_policy" "lambda_api" {
+#   name = "lambda-cwl-describe-puteval"
+#   policy = jsonencode({
+#     Version = "2012-10-17",
+#     Statement = [
+#       {
+#         Effect : "Allow"
+#         Action : ["logs:DescribeLogGroups"]
+#         Resource : "*"
+#       },
+#       {
+#         Effect : "Allow"
+#         Action : ["config:PutEvaluations"]
+#         Resource : "*"
+#       }
+#     ]
+#   })
+# }
 
-resource "aws_iam_role_policy_attachment" "lambda_api_attach" {
-  role       = aws_iam_role.lambda_role.name
-  policy_arn = aws_iam_policy.lambda_api.arn
-}
+# resource "aws_iam_role_policy_attachment" "lambda_api_attach" {
+#   role       = aws_iam_role.lambda_role.name
+#   policy_arn = aws_iam_policy.lambda_api.arn
+# }
 
 # ---------- Lambda function ----------
-resource "aws_lambda_function" "rule" {
-  function_name    = var.lambda_function_name
-  role             = aws_iam_role.lambda_role.arn
-  handler          = "lambda_function.handler"
-  runtime          = "python3.12"
-  filename         = data.archive_file.lambda_zip.output_path
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-  timeout          = 60
+# resource "aws_lambda_function" "rule" {
+#   function_name    = var.lambda_function_name
+#   role             = aws_iam_role.lambda_role.arn
+#   handler          = "lambda_function.handler"
+#   runtime          = "python3.12"
+#   filename         = data.archive_file.lambda_zip.output_path
+#   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+#   timeout          = 60
+# }
+
+# resource "aws_lambda_permission" "allow_config" {
+#   statement_id  = "AllowConfigInvoke"
+#   action        = "lambda:InvokeFunction"
+#   function_name = aws_lambda_function.rule.function_name
+#   principal     = "config.amazonaws.com"
+# }
+
+module "rule_lambda" {
+  source  = "terraform-aws-modules/lambda/aws"
+  version = "~> 7.0"
+
+  function_name = var.lambda_function_name
+  description   = "AWS Config CWL retention evaluator"
+  handler       = "lambda_function.handler"
+  runtime       = "python3.12"
+  timeout       = 60
+  publish       = true
+
+  # The module zips this directory for you
+  source_path = var.lambda_source_dir # default = "${path.module}/lambda"
+
+  # Create role and attach policies
+  create_role = true
+  role_name   = var.lambda_role_name
+
+  # Basic execution (writes logs) – module provides it
+  attach_cloudwatch_logs_policy = true
+
+  # Extra permissions lambda code needs
+  attach_policy_statements = true
+  policy_statements = {
+    logs_and_config = {
+      effect    = "Allow"
+      actions   = ["logs:DescribeLogGroups", "config:PutEvaluations"]
+      resources = ["*"]
+    }
+  }
+
+  # Allow AWS Config to invoke the function
+  allowed_triggers = {
+    aws_config_invoke = {
+      statement_id = "AllowConfigInvoke"
+      principal    = "config.amazonaws.com"
+      action       = "lambda:InvokeFunction"
+      # no SourceArn to avoid circular dep with the config rule
+    }
+  }
 }
 
-resource "aws_lambda_permission" "allow_config" {
-  statement_id  = "AllowConfigInvoke"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.rule.function_name
-  principal     = "config.amazonaws.com"
-}
 
 # ---------- Custom AWS Config rule (Lambda-backed) ----------
 resource "aws_config_config_rule" "rule" {
@@ -77,7 +120,7 @@ resource "aws_config_config_rule" "rule" {
 
   source {
     owner             = "CUSTOM_LAMBDA"
-    source_identifier = aws_lambda_function.rule.arn
+    source_identifier = module.rule_lambda.lambda_function_arn
 
     # Event-driven: evaluate on resource change
     source_detail {
@@ -205,7 +248,7 @@ resource "aws_config_remediation_configuration" "retention_fix" {
     static_value = tostring(var.default_retention_days)
   }
 
-  # Role Automation will assume (already created in your module)
+  # Role Automation will assume 
   parameter {
     name         = "AutomationAssumeRole"
     static_value = aws_iam_role.remediator.arn
@@ -217,3 +260,37 @@ resource "aws_config_remediation_configuration" "retention_fix" {
     aws_ssm_document.set_cwl_retention
   ]
 }
+
+
+# Delete these 3:
+# resource "aws_sns_topic" "this"
+# resource "aws_sns_topic_subscription" "email_subscriptions"
+# resource "aws_sns_topic_policy" "allow_eventbridge_publish"
+# --- Replace your aws_sns_* resources with this module ---
+module "cwl_retention_notifications" {
+  source  = "terraform-aws-modules/sns/aws"
+  version = "~> 5.0"
+
+  name = "cloudwatch-log-retention-notifications"
+
+  # create the email subscriptions
+  subscriptions = [
+    for e in var.notification_emails : {
+      protocol = "email"
+      endpoint = e
+    }
+  ]
+
+  # add the policy that lets EventBridge publish to the topic
+  topic_policy_statements = {
+    allow_eventbridge_publish = {
+      sid        = "Allow_EventBridge_Publish"
+      effect     = "Allow"
+      actions    = ["SNS:Publish"]
+      principals = [{ type = "Service", identifiers = ["events.amazonaws.com"] }]
+      # resource is auto-populated by the module with the topic ARN
+    }
+  }
+}
+
+# change target arn with module.cwl_retention_notifications.topic_arn 
