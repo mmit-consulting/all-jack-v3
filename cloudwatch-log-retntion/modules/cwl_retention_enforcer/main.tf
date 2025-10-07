@@ -1,75 +1,3 @@
-
-# # ---------- Package Lambda code from a separate python file ----------
-# data "archive_file" "lambda_zip" {
-#   type        = "zip"
-#   source_dir  = var.lambda_source_dir
-#   output_path = "${path.module}/cwl_retention_rule.zip"
-# }
-
-# # ---------- Lambda IAM ----------
-# resource "aws_iam_role" "lambda_role" {
-#   name = var.lambda_role_name
-#   assume_role_policy = jsonencode({
-#     Version = "2012-10-17"
-#     Statement = [
-#       {
-#         Effect : "Allow"
-#         Principal : {
-#           Service : "lambda.amazonaws.com"
-#         }
-#         Action : "sts:AssumeRole"
-#       }
-#     ]
-#   })
-# }
-
-# resource "aws_iam_role_policy_attachment" "lambda_basic" {
-#   role       = aws_iam_role.lambda_role.name
-#   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-# }
-
-# resource "aws_iam_policy" "lambda_api" {
-#   name = "lambda-cwl-describe-puteval"
-#   policy = jsonencode({
-#     Version = "2012-10-17",
-#     Statement = [
-#       {
-#         Effect : "Allow"
-#         Action : ["logs:DescribeLogGroups"]
-#         Resource : "*"
-#       },
-#       {
-#         Effect : "Allow"
-#         Action : ["config:PutEvaluations"]
-#         Resource : "*"
-#       }
-#     ]
-#   })
-# }
-
-# resource "aws_iam_role_policy_attachment" "lambda_api_attach" {
-#   role       = aws_iam_role.lambda_role.name
-#   policy_arn = aws_iam_policy.lambda_api.arn
-# }
-
-# ---------- Lambda function ----------
-# resource "aws_lambda_function" "rule" {
-#   function_name    = var.lambda_function_name
-#   role             = aws_iam_role.lambda_role.arn
-#   handler          = "lambda_function.handler"
-#   runtime          = "python3.12"
-#   filename         = data.archive_file.lambda_zip.output_path
-#   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-#   timeout          = 60
-# }
-
-# resource "aws_lambda_permission" "allow_config" {
-#   statement_id  = "AllowConfigInvoke"
-#   action        = "lambda:InvokeFunction"
-#   function_name = aws_lambda_function.rule.function_name
-#   principal     = "config.amazonaws.com"
-# }
-
 module "rule_lambda" {
   source  = "terraform-aws-modules/lambda/aws"
   version = "~> 7.0"
@@ -143,44 +71,79 @@ resource "aws_config_config_rule" "rule" {
 }
 
 # ---------- SSM Automation IAM role for remediation ----------
-data "aws_iam_policy_document" "ssm_trust" {
-  statement {
-    effect = "Allow"
-    principals {
-      type        = "Service"
-      identifiers = ["ssm.amazonaws.com"]
-    }
-    actions = ["sts:AssumeRole"]
-  }
+# data "aws_iam_policy_document" "ssm_trust" {
+#   statement {
+#     effect = "Allow"
+#     principals {
+#       type        = "Service"
+#       identifiers = ["ssm.amazonaws.com"]
+#     }
+#     actions = ["sts:AssumeRole"]
+#   }
+# }
+
+# resource "aws_iam_role" "remediator" {
+#   name               = var.remediation_role_name
+#   assume_role_policy = data.aws_iam_policy_document.ssm_trust.json
+# }
+
+# resource "aws_iam_role_policy_attachment" "ssm_automation_managed" {
+#   role       = aws_iam_role.remediator.name
+#   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole"
+# }
+
+# data "aws_iam_policy_document" "logs_put_retention" {
+#   statement {
+#     effect    = "Allow"
+#     actions   = ["logs:DescribeLogGroups", "logs:PutRetentionPolicy"]
+#     resources = ["*"]
+#   }
+# }
+
+# resource "aws_iam_policy" "logs_put_retention" {
+#   name   = "cwl-put-retention"
+#   policy = data.aws_iam_policy_document.logs_put_retention.json
+# }
+
+# resource "aws_iam_role_policy_attachment" "attach_logs_put_retention" {
+#   role       = aws_iam_role.remediator.name
+#   policy_arn = aws_iam_policy.logs_put_retention.arn
+# }
+# ---------- SSM Automation IAM role for remediation ----------
+
+module "cwl_put_retention_policy" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-policy"
+  version = "~> 5.39"
+
+  name = "cwl-put-retention"
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Action = [
+        "logs:DescribeLogGroups",
+        "logs:PutRetentionPolicy"
+      ],
+      Resource = "*"
+    }]
+  })
 }
 
-resource "aws_iam_role" "remediator" {
-  name               = var.remediation_role_name
-  assume_role_policy = data.aws_iam_policy_document.ssm_trust.json
+module "ssm_automation_role" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
+  version = "~> 5.39"
+
+  create_role           = true
+  role_name             = var.remediation_role_name
+  trusted_role_services = ["ssm.amazonaws.com"] # trust SSM Automation
+
+  # Attach AWS managed Automation role + our custom logs policy
+  custom_role_policy_arns = [
+    "arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole",
+    module.cwl_put_retention_policy.arn
+  ]
 }
 
-resource "aws_iam_role_policy_attachment" "ssm_automation_managed" {
-  role       = aws_iam_role.remediator.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole"
-}
-
-data "aws_iam_policy_document" "logs_put_retention" {
-  statement {
-    effect    = "Allow"
-    actions   = ["logs:DescribeLogGroups", "logs:PutRetentionPolicy"]
-    resources = ["*"]
-  }
-}
-
-resource "aws_iam_policy" "logs_put_retention" {
-  name   = "cwl-put-retention"
-  policy = data.aws_iam_policy_document.logs_put_retention.json
-}
-
-resource "aws_iam_role_policy_attachment" "attach_logs_put_retention" {
-  role       = aws_iam_role.remediator.name
-  policy_arn = aws_iam_policy.logs_put_retention.arn
-}
 
 # ---------- Auto-remediation wiring (SSM Automation runbook) ----------
 # Custom runbook that sets retention on a log group
@@ -251,7 +214,7 @@ resource "aws_config_remediation_configuration" "retention_fix" {
   # Role Automation will assume 
   parameter {
     name         = "AutomationAssumeRole"
-    static_value = aws_iam_role.remediator.arn
+    static_value = module.ssm_automation_role.iam_role_arn
   }
 
   depends_on = [
