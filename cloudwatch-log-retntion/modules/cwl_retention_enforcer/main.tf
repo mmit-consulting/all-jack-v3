@@ -247,3 +247,78 @@ module "cwl_retention_notifications" {
 
 # change target arn with module.cwl_retention_notifications.topic_arn 
 
+#########################
+
+# Create the lambda executor role
+# # Trust policy
+# {
+#   "Version": "2012-10-17",
+#   "Statement": [{
+#     "Effect": "Allow",
+#     "Principal": { "Service": "lambda.amazonaws.com" },
+#     "Action": "sts:AssumeRole"
+#   }]
+# }
+# # Permissions
+# {
+#   "Version": "2012-10-17",
+#   "Statement": [{
+#     "Sid": "AllowPublishToFormatterTopic",
+#     "Effect": "Allow",
+#     "Action": ["sns:Publish"],
+#     "Resource": "*"
+#   }]
+# }
+
+
+module "email_lambda" {
+  source  = "terraform-aws-modules/lambda/aws"
+  version = "~> 7.0"
+
+  function_name = var.email_lambda_function_name
+  description   = "Formats AWS Config compliance events and publishes to SNS with a custom Subject"
+  handler       = "lambda_function.handler"
+  runtime       = "python3.12"
+  timeout       = 30
+  publish       = true
+
+  # The module zips this directory for you
+  source_path = var.email_lambda_source_dir # default = "${path.module}/lambda_email"
+
+  # Create role and attach policies
+  create_role = false
+  lambda_role = var.email_lambda_execution_role_arn
+
+  attach_cloudwatch_logs_policy = false
+  attach_policy_statements      = false
+
+  # Variables the function reads
+  environment_variables = {
+    TOPIC_ARN      = module.cwl_retention_notifications.topic_arn
+    SUBJECT_PREFIX = "[CWL Retention]"
+  }
+
+  # Allow EventBridge rule to invoke this Lambda
+  allowed_triggers = {
+    from_eventbridge = {
+      statement_id = "AllowEventBridgeInvoke"
+      principal    = "events.amazonaws.com"
+      action       = "lambda:InvokeFunction"
+    }
+  }
+}
+
+# Then change eventbridge to invoke lambda
+# resource "aws_cloudwatch_event_target" "sns_target" {
+#   rule      = aws_cloudwatch_event_rule.config_compliance_change.name
+#   target_id = "SendToSNS"
+#   arn       = module.cwl_retention_notifications.topic_arn
+# }
+resource "aws_cloudwatch_event_target" "formatter_target" {
+  rule      = aws_cloudwatch_event_rule.config_compliance_change.name
+  target_id = "SendToFormatter"
+  arn       = module.email_lambda.lambda_function_arn
+}
+
+# Tidy up the SNS topic policy
+
