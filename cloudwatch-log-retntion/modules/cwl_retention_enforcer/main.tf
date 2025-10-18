@@ -13,21 +13,11 @@ module "rule_lambda" {
   source_path = var.lambda_source_dir # default = "${path.module}/lambda"
 
   # Create role and attach policies
-  create_role = true
-  role_name   = var.lambda_role_name
+  create_role = false
+  lambda_role = var.lambda_execution_role_arn
 
-  # Basic execution (writes logs) – module provides it
-  attach_cloudwatch_logs_policy = true
-
-  # Extra permissions lambda code needs
-  attach_policy_statements = true
-  policy_statements = {
-    logs_and_config = {
-      effect    = "Allow"
-      actions   = ["logs:DescribeLogGroups", "config:PutEvaluations"]
-      resources = ["*"]
-    }
-  }
+  attach_cloudwatch_logs_policy = false
+  attach_policy_statements      = false
 
   # Allow AWS Config to invoke the function
   allowed_triggers = {
@@ -135,7 +125,7 @@ module "ssm_automation_role" {
 
   create_role           = true
   role_name             = var.remediation_role_name
-  trusted_role_services = ["ssm.amazonaws.com"] # trust SSM Automation
+  trusted_role_services = []
 
   # Attach AWS managed Automation role + our custom logs policy
   custom_role_policy_arns = [
@@ -256,3 +246,4 @@ module "cwl_retention_notifications" {
 }
 
 # change target arn with module.cwl_retention_notifications.topic_arn 
+

@@ -24,10 +24,9 @@ variable "lambda_function_name" {
   default     = "config-cwl-retention-missing"
 }
 
-variable "lambda_role_name" {
-  description = "IAM role name for the Lambda."
+variable "lambda_execution_role_arn" {
+  description = "IAM role ARN for the Lambda, it must be created before"
   type        = string
-  default     = "config-cwl-retention-rule"
 }
 
 variable "remediation_role_name" {
