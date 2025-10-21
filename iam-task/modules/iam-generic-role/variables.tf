@@ -18,6 +18,22 @@ variable "trust_policy_conditions" {
   default = []
 }
 
+variable "federated_principals" {
+  description = "List of Federated principals (e.g., OIDC provider ARNs)."
+  type        = list(string)
+  default     = []
+}
+
+variable "federated_trust_policy_conditions" {
+  description = "Optional conditions for the federated trust statement."
+  type = list(object({
+    test     = string
+    variable = string
+    values   = list(string)
+  }))
+  default = []
+}
+
 variable "tags" {
   description = "Tags to apply to the IAM role"
   type        = map(string)

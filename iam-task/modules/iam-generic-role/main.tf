@@ -11,26 +11,78 @@
 ##########################
 
 # Assume role trust policy
-data "aws_iam_policy_document" "assume_role" {
-  statement {
-    effect = "Allow"
-    principals {
-      type        = "Service"
-      identifiers = var.trusted_services
-    }
-    actions = ["sts:AssumeRole"]
+# data "aws_iam_policy_document" "assume_role" {
+#   statement {
+#     effect = "Allow"
+#     principals {
+#       type        = "Service"
+#       identifiers = var.trusted_services
+#     }
+#     actions = ["sts:AssumeRole"]
 
-    dynamic "condition" {
-      for_each = var.trust_policy_conditions
-      content {
-        test     = condition.value.test
-        variable = condition.value.variable
-        values   = condition.value.values
+#     dynamic "condition" {
+#       for_each = var.trust_policy_conditions
+#       content {
+#         test     = condition.value.test
+#         variable = condition.value.variable
+#         values   = condition.value.values
+#       }
+#     }
+
+#   }
+# }
+
+data "aws_iam_policy_document" "assume_role" {
+  # --- Service principals (e.g., lambda.amazonaws.com, ecs-tasks.amazonaws.com)
+  dynamic "statement" {
+    for_each = length(var.trusted_services) > 0 ? [1] : []
+    content {
+      effect = "Allow"
+
+      principals {
+        type        = "Service"
+        identifiers = var.trusted_services
+      }
+
+      actions = ["sts:AssumeRole"]
+
+      dynamic "condition" {
+        for_each = var.trust_policy_conditions
+        content {
+          test     = condition.value.test
+          variable = condition.value.variable
+          values   = condition.value.values
+        }
       }
     }
+  }
 
+  # --- Federated principals (OIDC)
+  dynamic "statement" {
+    for_each = length(var.federated_principals) > 0 ? [1] : []
+    content {
+      effect = "Allow"
+
+      principals {
+        type        = "Federated"
+        identifiers = var.federated_principals
+      }
+
+      actions = ["sts:AssumeRoleWithWebIdentity"]
+
+      dynamic "condition" {
+        for_each = var.federated_trust_policy_conditions
+        content {
+          test     = condition.value.test
+          variable = condition.value.variable
+          values   = condition.value.values
+        }
+      }
+    }
   }
 }
+
+
 
 # IAM Role definition
 resource "aws_iam_role" "this" {

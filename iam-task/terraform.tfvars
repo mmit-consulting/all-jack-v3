@@ -68,7 +68,7 @@ iam_generic_roles = {
       Env   = "dev"
     }
   }
-    aig_streaming = {
+  aig_streaming = {
     role_name = "aig-streaming"
 
     trusted_services = [
@@ -87,4 +87,34 @@ iam_generic_roles = {
     tags = {
     }
   }
+
+  github_actions_deployer = {
+    role_name        = "github-actions-deployer"
+    trusted_services = ["lambda.amazonaws.com"] # optional; can be []
+    trust_policy_conditions = []                # optional
+
+    federated_principals = [
+      "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ]
+    federated_trust_policy_conditions = [
+      {
+        test     = "StringEquals"
+        variable = "token.actions.githubusercontent.com:aud"
+        values   = ["sts.amazonaws.com"]
+      },
+      {
+        test     = "StringLike"
+        variable = "token.actions.githubusercontent.com:sub"
+        values   = ["repo:xxxx-yhyy/*:*"]
+      }
+    ]
+
+    custom_policy_paths = []
+    aws_managed_policy_arns = []
+    create_inline_policy      = false
+    custom_inline_policy_path = null
+    tags = {}
+  }
+
+
 }
